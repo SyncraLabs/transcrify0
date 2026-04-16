@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { apiMiddleware, sendWebhook, optionsResponse, corsHeaders } from "@/lib/api-utils";
 import { downloadAudio, getVideoInfo } from "@/lib/server-download-utils";
+import { incrementUsage, saveTranscription } from "@/lib/usage";
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -76,8 +77,8 @@ async function processUrl(url: string) {
 }
 
 export async function POST(request: NextRequest) {
-    // Apply middleware (auth + rate limiting)
-    const middleware = apiMiddleware(request);
+    // Apply middleware (auth + usage limits)
+    const middleware = await apiMiddleware(request);
     if (!middleware.ok) {
         return middleware.error;
     }
@@ -102,11 +103,39 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Check if user has enough quota for the batch
+        if (middleware.usage && middleware.usage.remaining !== -1 && urls.length > middleware.usage.remaining) {
+            return NextResponse.json(
+                {
+                    error: `Not enough quota. You have ${middleware.usage.remaining} transcriptions remaining but requested ${urls.length}.`,
+                    code: "INSUFFICIENT_QUOTA",
+                    usage: middleware.usage,
+                },
+                { status: 429, headers: corsHeaders() }
+            );
+        }
+
         // Process URLs sequentially to avoid overwhelming the API
         const results = [];
         for (const url of urls) {
             const result = await processUrl(url);
             results.push(result);
+
+            // Increment usage and save for each successful transcription
+            if (result.success && 'full_text' in result) {
+                if (middleware.user) {
+                    await incrementUsage({ type: "user", userId: middleware.user.id });
+                    await saveTranscription(middleware.user.id, {
+                        url,
+                        title: result.title,
+                        full_text: result.full_text || "",
+                        paragraphs: result.paragraphs,
+                        segments: result.segments,
+                    });
+                } else {
+                    await incrementUsage({ type: "anonymous", ip: middleware.ip });
+                }
+            }
         }
 
         const responseData = {

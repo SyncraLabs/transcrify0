@@ -23,3 +23,18 @@ Thumbs.db
 .idea/
 .vscode/
 .env.local
+
+# Claude / MCP local config
+.claude/
+.mcp.json
+
+# Debug / scratch files
+1770*-player-script.js
+debug-*.js
+test-*.js
+test-*.mjs
+dev-server*.log
+*.log
+test_output.txt
+yt-dlp.exe
+yt-dlp

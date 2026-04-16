@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Sparkles, Copy, Loader2, Link as LinkIcon, Check, Plus, X,
-    Download, FileText, FileCode, FileType, Trash2, Package
+    Download, FileText, FileCode, FileType, Trash2, Package, ArrowUpRight, UserPlus
 } from "lucide-react";
 import axios from "axios";
+import Link from "next/link";
+import { useAuth } from "@/components/providers/auth-provider";
 
 interface TranscriptionResult {
     url: string;
     title: string;
+    ai_title?: string;
+    author?: string;
     success: boolean;
     full_text?: string;
     paragraphs?: string[];
@@ -19,13 +23,41 @@ interface TranscriptionResult {
     error?: string;
 }
 
+interface UsageInfo {
+    authenticated: boolean;
+    plan: string;
+    used: number;
+    limit: number;
+    remaining: number;
+}
+
+import { downloadAllAsMergedMarkdown } from "@/lib/downloadUtils";
+
 export default function Transcriber() {
+    const { user } = useAuth();
     const [urls, setUrls] = useState<string[]>([""]);
     const [results, setResults] = useState<TranscriptionResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState<number | null>(null);
     const [currentProcessing, setCurrentProcessing] = useState<string>("");
+    const [usage, setUsage] = useState<UsageInfo | null>(null);
+    const [showLimitBanner, setShowLimitBanner] = useState(false);
+
+    // Fetch usage on mount and after each transcription
+    const fetchUsage = () => {
+        fetch("/api/usage")
+            .then((r) => r.json())
+            .then((data) => {
+                setUsage(data);
+                if (data.remaining === 0) setShowLimitBanner(true);
+            })
+            .catch(console.error);
+    };
+
+    useEffect(() => {
+        fetchUsage();
+    }, [user]);
 
     const addUrl = () => {
         setUrls([...urls, ""]);
@@ -49,28 +81,51 @@ export default function Transcriber() {
 
         setLoading(true);
         setError("");
-        setResults([]);
+        setResults([]); // Clear previous results to show progress
 
         try {
-            if (validUrls.length === 1) {
-                setCurrentProcessing("Downloading & transcribing...");
-                const response = await axios.post("/api/transcribe", {
-                    url: validUrls[0],
-                });
-                setResults([{ url: validUrls[0], success: true, ...response.data }]);
-            } else {
-                setCurrentProcessing(`Processing ${validUrls.length} videos...`);
-                const response = await axios.post("/api/transcribe/batch", {
-                    urls: validUrls,
-                });
-                setResults(response.data.results);
+            for (let i = 0; i < validUrls.length; i++) {
+                const url = validUrls[i];
+                setCurrentProcessing(`Processing ${i + 1}/${validUrls.length}...`);
+
+                try {
+                    // Process one by one client-side for better progress tracking
+                    const response = await axios.post("/api/transcribe", { url });
+
+                    const result: TranscriptionResult = {
+                        url,
+                        success: true,
+                        ...response.data
+                    };
+
+                    setResults(prev => [...prev, result]);
+                } catch (err: any) {
+                    console.error(`Failed to transcribe ${url}:`, err);
+
+                    // Check if limit was reached
+                    if (err.response?.status === 429) {
+                        setShowLimitBanner(true);
+                        fetchUsage();
+                        break; // Stop processing remaining URLs
+                    }
+
+                    const errorResult: TranscriptionResult = {
+                        url,
+                        title: "Error",
+                        author: "Unknown",
+                        success: false,
+                        error: err.response?.data?.error || err.message || "Failed"
+                    };
+                    setResults(prev => [...prev, errorResult]);
+                }
             }
         } catch (err: any) {
             console.error(err);
-            setError(err.response?.data?.detail || "Failed to transcribe. Check URLs or backend.");
+            setError("Batch processing encountered an unexpected error.");
         } finally {
             setLoading(false);
             setCurrentProcessing("");
+            fetchUsage(); // Refresh usage after transcription
         }
     };
 
@@ -97,12 +152,13 @@ export default function Transcriber() {
     };
 
     const downloadAsTxt = (result: TranscriptionResult) => {
-        const content = result.paragraphs?.join("\n\n") || result.full_text || "";
+        const header = `Title: ${result.title}\nAuthor: ${result.author || "Unknown"}\nSource: ${result.url}\n\n`;
+        const content = header + (result.paragraphs?.join("\n\n") || result.full_text || "");
         downloadFile(content, `${sanitizeFilename(result.title)}.txt`, "text/plain");
     };
 
     const downloadAsMd = (result: TranscriptionResult) => {
-        let content = `# ${result.title}\n\n**Source:** ${result.url}\n\n---\n\n`;
+        let content = `# ${result.title}\n\n**Author:** ${result.author || "Unknown"}\n\n**Source:** ${result.url}\n\n---\n\n`;
         if (result.paragraphs) {
             result.paragraphs.forEach((p) => {
                 content += `${p}\n\n`;
@@ -145,7 +201,8 @@ export default function Transcriber() {
         let content = "";
         successfulResults.forEach((result, i) => {
             content += `${"=".repeat(60)}\n`;
-            content += `${result.title}\n`;
+            content += `${result.ai_title || result.title}\n`;
+            content += `Author: ${result.author || "Unknown"}\n`;
             content += `Source: ${result.url}\n`;
             content += `${"=".repeat(60)}\n\n`;
             content += (result.paragraphs?.join("\n\n") || result.full_text || "") + "\n\n\n";
@@ -155,23 +212,7 @@ export default function Transcriber() {
 
     const downloadAllAsMd = () => {
         const successfulResults = results.filter(r => r.success);
-        let content = `# All Transcriptions\n\n`;
-        content += `*Generated on ${new Date().toLocaleString()}*\n\n---\n\n`;
-
-        successfulResults.forEach((result, i) => {
-            content += `## ${i + 1}. ${result.title}\n\n`;
-            content += `**Source:** [${result.url}](${result.url})\n\n`;
-            if (result.paragraphs) {
-                result.paragraphs.forEach((p) => {
-                    content += `${p}\n\n`;
-                });
-            } else {
-                content += (result.full_text || "") + "\n\n";
-            }
-            content += `---\n\n`;
-        });
-
-        downloadFile(content, `all_transcriptions.md`, "text/markdown");
+        downloadAllAsMergedMarkdown(successfulResults as any);
     };
 
     const downloadAllAsJson = () => {
@@ -202,6 +243,77 @@ export default function Transcriber() {
                 </div>
                 <p className="text-zinc-400">Instantly transcribe TikToks, Reels, and Shorts. Powered by OpenAI Whisper.</p>
             </motion.div>
+
+            {/* Usage Badge */}
+            {usage && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center gap-2 text-sm"
+                >
+                    <span className={cn(
+                        "px-3 py-1 rounded-full text-xs font-medium border",
+                        usage.remaining === 0
+                            ? "bg-red-500/10 text-red-400 border-red-500/20"
+                            : usage.remaining <= 1
+                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    )}>
+                        {usage.remaining === -1 ? "Unlimited" : `${usage.remaining} transcription${usage.remaining !== 1 ? "s" : ""} remaining`}
+                    </span>
+                    {!usage.authenticated && (
+                        <Link href="/auth/signup" className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 transition-colors">
+                            <UserPlus className="w-3 h-3" /> Sign up for more
+                        </Link>
+                    )}
+                    {usage.authenticated && usage.plan === "free" && (
+                        <Link href="/pricing" className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 transition-colors">
+                            <ArrowUpRight className="w-3 h-3" /> Upgrade
+                        </Link>
+                    )}
+                </motion.div>
+            )}
+
+            {/* Limit Reached Banner */}
+            <AnimatePresence>
+                {showLimitBanner && usage?.remaining === 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="w-full overflow-hidden"
+                    >
+                        <div className={cn(
+                            "rounded-xl border p-5 text-center",
+                            !usage.authenticated
+                                ? "bg-blue-950/30 border-blue-500/20"
+                                : "bg-purple-950/30 border-purple-500/20"
+                        )}>
+                            {!usage.authenticated ? (
+                                <>
+                                    <p className="text-white font-medium mb-1">You&apos;ve used your 3 free transcriptions today</p>
+                                    <p className="text-neutral-400 text-sm mb-3">Create a free account to get 5 transcriptions per day + save your history</p>
+                                    <Link href="/auth/signup">
+                                        <button className="px-6 py-2 bg-[#0079da] hover:bg-[#0069c0] text-white font-medium rounded-lg text-sm transition-colors">
+                                            Sign up free
+                                        </button>
+                                    </Link>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-white font-medium mb-1">Daily limit reached</p>
+                                    <p className="text-neutral-400 text-sm mb-3">Upgrade to Basic ($5/mo) for 30 transcriptions/day or Pro ($15/mo) for unlimited</p>
+                                    <Link href="/pricing">
+                                        <button className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-medium rounded-lg text-sm transition-colors hover:brightness-110">
+                                            View Plans
+                                        </button>
+                                    </Link>
+                                </>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Input Card */}
             <motion.div
@@ -361,9 +473,12 @@ export default function Transcriber() {
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1 min-w-0">
                                     <h3 className="text-zinc-100 font-semibold text-lg truncate">
-                                        {result.title || `Result ${index + 1}`}
+                                        {result.ai_title || result.title || `Result ${index + 1}`}
                                     </h3>
-                                    <p className="text-zinc-500 text-xs truncate mt-1">{result.url}</p>
+                                    <div className="flex flex-col space-y-1 mt-1">
+                                        <p className="text-zinc-400 text-sm font-medium">by {result.author || "Unknown"}</p>
+                                        <p className="text-zinc-500 text-xs truncate">{result.url}</p>
+                                    </div>
                                 </div>
 
                                 {result.success && (

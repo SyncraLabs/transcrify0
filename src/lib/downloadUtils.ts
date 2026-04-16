@@ -81,3 +81,34 @@ export const downloadAllAsZip = async (results: { title: string; full_text: stri
     element.click();
     document.body.removeChild(element);
 };
+
+export const downloadAllAsMergedMarkdown = (results: { title: string; ai_title?: string; author?: string; url?: string; full_text: string; paragraphs?: string[] }[]) => {
+    let content = `# All Transcriptions\n\n`;
+    content += `*Generated on ${new Date().toLocaleString()}*\n\n---\n\n`;
+
+    results.forEach((result, i) => {
+        const displayTitle = result.ai_title || result.title || `Video ${i + 1}`;
+        const author = result.author || "Unknown Author";
+
+        content += `## ${i + 1}. ${displayTitle}\n\n`;
+        content += `**Author:** ${author}\n\n`;
+        if (result.url) content += `**Source:** [${result.url}](${result.url})\n\n`;
+
+        if (result.paragraphs && result.paragraphs.length > 0) {
+            result.paragraphs.forEach((p) => {
+                content += `${p}\n\n`;
+            });
+        } else {
+            content += (result.full_text || "") + "\n\n";
+        }
+        content += `---\n\n`;
+    });
+
+    const element = document.createElement("a");
+    const file = new Blob([content], { type: "text/markdown" });
+    element.href = URL.createObjectURL(file);
+    element.download = `all_transcriptions_${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+};

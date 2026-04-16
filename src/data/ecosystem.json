@@ -1,0 +1,21 @@
+{
+  "brand": "AI Tools by Rodri",
+  "author": {
+    "name": "Rodri",
+    "role": "AI Creator & Founder",
+    "description": "Builds AI-powered tools and runs an AI agency working with large enterprises."
+  },
+  "apps": [
+    {
+      "id": "transcrify",
+      "name": "Transcrify",
+      "tagline": "Video to Text with AI",
+      "description": "Convert videos from YouTube, TikTok, Instagram and more into perfectly formatted text.",
+      "url": "https://transcrify.com",
+      "keywords": ["transcription", "video", "text", "ai", "whisper"],
+      "category": "transcription",
+      "status": "live",
+      "crossLinkText": "Transcribe videos to text"
+    }
+  ]
+}

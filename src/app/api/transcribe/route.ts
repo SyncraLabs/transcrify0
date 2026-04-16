@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { apiMiddleware, sendWebhook, optionsResponse, corsHeaders } from "@/lib/api-utils";
 import { downloadAudio, getVideoInfo } from "@/lib/server-download-utils";
+import { incrementUsage, saveTranscription } from "@/lib/usage";
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
-
-
 
 async function transcribeAudio(audioBuffer: Buffer, filename: string) {
     const uint8Array = new Uint8Array(audioBuffer);
@@ -60,10 +59,10 @@ export async function POST(request: NextRequest) {
     console.log("API: POST /api/transcribe called");
     console.log("----------------------------------------------------------------");
 
-    // Apply middleware (auth + rate limiting)
-    const middleware = apiMiddleware(request);
+    // Apply middleware (auth + usage limits)
+    const middleware = await apiMiddleware(request);
     if (!middleware.ok) {
-        console.log("API: Middleware failed", middleware.error);
+        console.log("API: Middleware failed (limit reached)");
         return middleware.error;
     }
 
@@ -93,11 +92,55 @@ export async function POST(request: NextRequest) {
         const result = await transcribeAudio(audioBuffer, filename);
         console.log("API: Transcription complete");
 
+        // Generate AI Title
+        let aiTitle = "";
+        try {
+            const completion = await openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: "You are a helpful assistant. Generate a concise, engaging title (max 6 words) that summarizes the video transcript provided. Do not use quotes." },
+                    { role: "user", content: `Transcript: ${result.full_text.substring(0, 2000)}...` }
+                ],
+            });
+            aiTitle = completion.choices[0].message.content || "";
+        } catch (e) {
+            console.error("AI Title generation failed:", e);
+        }
+
+        // Increment usage
+        if (middleware.user) {
+            await incrementUsage({ type: "user", userId: middleware.user.id });
+        } else {
+            await incrementUsage({ type: "anonymous", ip: middleware.ip });
+        }
+
+        // Save transcription for logged-in users
+        if (middleware.user) {
+            await saveTranscription(middleware.user.id, {
+                url,
+                title: info.title,
+                ai_title: aiTitle,
+                author: info.author,
+                full_text: result.full_text,
+                paragraphs: result.paragraphs,
+                segments: result.segments,
+            });
+        }
+
         const responseData = {
             success: true,
             title: info.title,
+            ai_title: aiTitle,
+            author: info.author,
             url,
             ...result,
+            usage: middleware.usage
+                ? {
+                    used: (middleware.usage.used || 0) + 1,
+                    limit: middleware.usage.limit,
+                    remaining: middleware.usage.remaining === -1 ? -1 : Math.max(0, (middleware.usage.remaining || 0) - 1),
+                }
+                : undefined,
         };
 
         // Send webhook if provided

@@ -3,11 +3,7 @@
 
 import { useState } from "react";
 import { Navbar } from "@/components/navbar";
-import { LandingHero } from "@/components/landing-hero";
-import { Features } from "@/components/features";
-import { HowItWorks } from "@/components/how-it-works";
-import { Testimonials } from "@/components/testimonials";
-import { FAQ } from "@/components/faq";
+import Transcriber from "@/components/Transcriber";
 import { Footer } from "@/components/footer";
 import { dictionary, Language } from "@/lib/i18n";
 
@@ -23,11 +19,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-black text-white selection:bg-white/20">
       <Navbar lang={lang} dict={dict} onToggleLang={toggleLang} />
-      <LandingHero dict={dict} />
-      <Features dict={dict} />
-      <HowItWorks dict={dict} />
-      <Testimonials dict={dict} />
-      <FAQ dict={dict} />
+      <div className="flex-1 flex justify-center w-full pt-20">
+        <Transcriber />
+      </div>
       <Footer dict={dict} />
     </main>
   );

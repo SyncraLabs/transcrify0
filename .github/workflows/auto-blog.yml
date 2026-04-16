@@ -1,0 +1,52 @@
+name: Daily Blog Post
+
+on:
+  schedule:
+    # Runs every day at 10:00 UTC (12:00 Madrid / 11:00 UK)
+    - cron: '17 10 * * *'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  generate-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate blog post
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx scripts/auto-blog-ci.ts
+
+      - name: Check for new files
+        id: check
+        run: |
+          if git diff --name-only --cached | grep -q "content/blog/"; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          elif git status --porcelain content/blog/ | grep -q "??"; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          git config user.name "Transcrify Bot"
+          git config user.email "bot@transcrify.com"
+          git add content/blog/*.mdx
+          git commit -m "blog: auto-generate daily post [$(date +%Y-%m-%d)]"
+          git push

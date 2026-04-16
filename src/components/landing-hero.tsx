@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dictionary } from "@/lib/i18n";
-import { downloadMarkdown, downloadPDF, downloadTXT, downloadAllAsZip } from "@/lib/downloadUtils";
+import { downloadMarkdown, downloadPDF, downloadTXT, downloadAllAsMergedMarkdown } from "@/lib/downloadUtils";
 import { Logo } from "@/components/logo";
 
 interface LandingHeroProps {
@@ -20,6 +20,8 @@ interface LandingHeroProps {
 type TranscriptionResult = {
     url?: string;
     title: string;
+    ai_title?: string;
+    author?: string;
     full_text: string;
     paragraphs?: string[];
     success?: boolean;
@@ -31,6 +33,7 @@ export function LandingHero({ dict }: LandingHeroProps) {
     const [url, setUrl] = useState("");
     const [batchUrls, setBatchUrls] = useState("");
     const [loading, setLoading] = useState(false);
+    const [currentProcessing, setCurrentProcessing] = useState("");
     const [result, setResult] = useState<TranscriptionResult | null>(null);
     const [batchResults, setBatchResults] = useState<TranscriptionResult[]>([]);
     const [error, setError] = useState("");
@@ -44,21 +47,24 @@ export function LandingHero({ dict }: LandingHeroProps) {
         setError("");
         setResult(null);
         setBatchResults([]);
+        setCurrentProcessing("");
 
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
 
         if (mode === "single") {
             if (!url.trim()) return;
             setLoading(true);
+            setCurrentProcessing("Procesando video...");
             try {
                 const response = await axios.post(`${apiUrl}/transcribe`, { url });
                 setResult(response.data);
                 fireConfetti();
-            } catch (err) {
+            } catch (err: any) {
                 console.error(err);
                 setError(dict?.error?.generic || "Ocurrió un error. Verifica la URL e intenta nuevamente.");
             } finally {
                 setLoading(false);
+                setCurrentProcessing("");
             }
         } else {
             const urls = batchUrls.split("\n").map(u => u.trim()).filter(u => u);
@@ -67,18 +73,34 @@ export function LandingHero({ dict }: LandingHeroProps) {
                 return;
             }
             setLoading(true);
-            try {
-                const response = await axios.post(`${apiUrl}/transcribe/batch`, { urls });
-                setBatchResults(response.data.results);
-                if (response.data.results.some((r: any) => r.success)) {
-                    fireConfetti();
+
+            let hasSuccess = false;
+            for (let i = 0; i < urls.length; i++) {
+                const currentUrl = urls[i];
+                setCurrentProcessing(`Procesando ${i + 1}/${urls.length}...`);
+                try {
+                    const response = await axios.post(`${apiUrl}/transcribe`, { url: currentUrl });
+                    const newResult = { ...response.data, url: currentUrl, success: true };
+                    setBatchResults(prev => [...prev, newResult]);
+                    hasSuccess = true;
+                } catch (err: any) {
+                    console.error(`Error processing ${currentUrl}`, err);
+                    const errorResult: TranscriptionResult = {
+                        url: currentUrl,
+                        title: "Error",
+                        full_text: "",
+                        success: false,
+                        error: "Falló la transcripción"
+                    };
+                    setBatchResults(prev => [...prev, errorResult]);
                 }
-            } catch (err) {
-                console.error(err);
-                setError(dict?.error?.generic || "Ocurrió un error en el procesamiento por lotes.");
-            } finally {
-                setLoading(false);
             }
+
+            if (hasSuccess) {
+                fireConfetti();
+            }
+            setLoading(false);
+            setCurrentProcessing("");
         }
     };
 
@@ -336,8 +358,10 @@ export function LandingHero({ dict }: LandingHeroProps) {
                                                 initial={{ scale: 0 }}
                                                 animate={{ scale: 1 }}
                                                 exit={{ scale: 0 }}
+                                                className="flex items-center"
                                             >
                                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                                <span>{currentProcessing || dict?.hero?.processing || "Procesando..."}</span>
                                             </motion.div>
                                         ) : (
                                             <motion.div
@@ -366,15 +390,16 @@ export function LandingHero({ dict }: LandingHeroProps) {
                 {/* Results Section */}
                 <div className="w-full max-w-4xl mt-8 space-y-6 z-30">
                     {/* Download All for Batch */}
-                    {batchResults.some(r => r.success) && (
+                    {/* Download All for Batch */}
+                    {batchResults.filter(r => r.success).length > 0 && (
                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end">
                             <Button
-                                onClick={() => downloadAllAsZip(batchResults.filter(r => r.success && r.title && r.full_text) as any)}
+                                onClick={() => downloadAllAsMergedMarkdown(batchResults.filter(r => r.success) as any)}
                                 variant="outline"
                                 className="border-neutral-700 bg-neutral-900/50 text-neutral-300 hover:bg-neutral-800 hover:text-white backdrop-blur-sm"
                             >
                                 <Download className="mr-2 h-4 w-4" />
-                                {dict?.result?.download_all || "Descargar Todo ZIP"}
+                                Descargar Todo (Markdown)
                             </Button>
                         </motion.div>
                     )}
@@ -406,9 +431,16 @@ export function LandingHero({ dict }: LandingHeroProps) {
                                                         <Check className="w-3 h-3" /> Éxito
                                                     </span>
                                                 )}
-                                                <CardTitle className="text-lg font-semibold leading-tight text-white/90">
-                                                    {item.title || "Sin Título"}
-                                                </CardTitle>
+                                                <div className="flex flex-col">
+                                                    <CardTitle className="text-lg font-semibold leading-tight text-white/90">
+                                                        {item.ai_title || item.title || "Sin Título"}
+                                                    </CardTitle>
+                                                    {item.author && (
+                                                        <span className="text-sm text-neutral-500 font-medium">
+                                                            by {item.author}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             {item.url && <CardDescription className="text-neutral-500 font-mono text-xs truncate max-w-md">{item.url}</CardDescription>}
                                             {item.error && <p className="text-red-400 text-sm">{item.error}</p>}
