@@ -4,15 +4,25 @@ import { apiMiddleware, sendWebhook, optionsResponse, corsHeaders } from "@/lib/
 import { downloadAudio, getVideoInfo } from "@/lib/server-download-utils";
 import { incrementUsage, saveTranscription } from "@/lib/usage";
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+    if (!_openai) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error("Missing OPENAI_API_KEY");
+        }
+        _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return _openai;
+}
 
 async function transcribeAudio(audioBuffer: Buffer, filename: string) {
     const uint8Array = new Uint8Array(audioBuffer);
     const file = new File([uint8Array], filename, { type: "audio/webm" });
 
-    const result = await openai.audio.transcriptions.create({
+    const result = await getOpenAI().audio.transcriptions.create({
         model: "whisper-1",
         file: file,
         response_format: "verbose_json",
@@ -95,7 +105,7 @@ export async function POST(request: NextRequest) {
         // Generate AI Title
         let aiTitle = "";
         try {
-            const completion = await openai.chat.completions.create({
+            const completion = await getOpenAI().chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     { role: "system", content: "You are a helpful assistant. Generate a concise, engaging title (max 6 words) that summarizes the video transcript provided. Do not use quotes." },
