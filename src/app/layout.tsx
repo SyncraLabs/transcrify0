@@ -4,8 +4,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/components/providers/auth-provider";
-import AdSenseScript from "@/components/ads/adsense-script";
 import CookieConsent from "@/components/ads/cookie-consent";
+import { ADSENSE_CLIENT_ID } from "@/lib/ads";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -52,11 +52,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className="dark">
+      <head>
+        <script
+          async
+          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`}
+          crossOrigin="anonymous"
+        />
+      </head>
       <body className={cn(inter.className, "min-h-screen bg-black text-white antialiased")}>
         <AuthProvider>
           {children}
         </AuthProvider>
-        <AdSenseScript />
         <CookieConsent />
       </body>
     </html>
