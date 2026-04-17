@@ -3,12 +3,16 @@
 
 import { useState } from "react";
 import { Navbar } from "@/components/navbar";
-import Transcriber from "@/components/Transcriber";
+import { LandingHero } from "@/components/landing-hero";
+import { Features } from "@/components/features";
+import { HowItWorks } from "@/components/how-it-works";
+import { Testimonials } from "@/components/testimonials";
+import { FAQ } from "@/components/faq";
 import { Footer } from "@/components/footer";
 import { dictionary, Language } from "@/lib/i18n";
 
 export default function Home() {
-  const [lang, setLang] = useState<Language>("es"); // Default to Spanish as per user context (syncralabs.es)
+  const [lang, setLang] = useState<Language>("es");
 
   const toggleLang = () => {
     setLang((prev) => (prev === "en" ? "es" : "en"));
@@ -19,8 +23,12 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-black text-white selection:bg-white/20">
       <Navbar lang={lang} dict={dict} onToggleLang={toggleLang} />
-      <div className="flex-1 flex justify-center w-full pt-20">
-        <Transcriber />
+      <div className="pt-20">
+        <LandingHero dict={dict} />
+        <Features dict={dict} />
+        <HowItWorks dict={dict} />
+        <Testimonials dict={dict} />
+        <FAQ dict={dict} />
       </div>
       <Footer dict={dict} />
     </main>
