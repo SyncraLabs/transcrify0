@@ -9,7 +9,7 @@ import CookieConsent from "@/components/ads/cookie-consent";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.com";
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.es";
 
 export const metadata: Metadata = {
   title: {

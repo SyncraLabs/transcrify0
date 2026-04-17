@@ -1,17 +1,14 @@
-"use client";
-
 import Script from "next/script";
-import { adsConfig } from "@/lib/ads";
+import { ADSENSE_CLIENT_ID } from "@/lib/ads";
 
 export default function AdSenseScript() {
-  if (!adsConfig.enabled || !adsConfig.clientId) return null;
-
   return (
     <Script
+      id="adsense-loader"
       async
-      src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsConfig.clientId}`}
+      src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`}
       crossOrigin="anonymous"
-      strategy="lazyOnload"
+      strategy="afterInteractive"
     />
   );
 }

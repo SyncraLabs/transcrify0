@@ -3,7 +3,7 @@ import { getAllPosts } from "@/lib/blog";
 import { getAllToolPages } from "@/lib/seo-pages";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.com";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.es";
   const now = new Date();
 
   const staticPages: MetadataRoute.Sitemap = [
