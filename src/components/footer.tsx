@@ -49,9 +49,9 @@ export function Footer({ dict }: FooterProps) {
                     <div>
                         <h4 className="font-semibold text-white mb-6">Legal</h4>
                         <ul className="space-y-4 text-neutral-400">
-                            <li><a href="#" className="hover:text-white transition-colors">{dict.footer.links.terms}</a></li>
-                            <li><a href="#" className="hover:text-white transition-colors">{dict.footer.links.privacy}</a></li>
-                            <li><a href="#" className="hover:text-white transition-colors">{dict.footer.links.contact}</a></li>
+                            <li><Link href="/terms" className="hover:text-white transition-colors">{dict.footer.links.terms}</Link></li>
+                            <li><Link href="/privacy" className="hover:text-white transition-colors">{dict.footer.links.privacy}</Link></li>
+                            <li><a href="mailto:rodrigodigitalinfluence@gmail.com" className="hover:text-white transition-colors">{dict.footer.links.contact}</a></li>
                         </ul>
                     </div>
                 </div>
