@@ -38,3 +38,4 @@ dev-server*.log
 test_output.txt
 yt-dlp.exe
 yt-dlp
+.vercel

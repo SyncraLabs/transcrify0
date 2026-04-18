@@ -25,7 +25,6 @@ export function detectPlatform(url: string): Platform {
     return "other";
 }
 
-// SSRF protection: reject non-http(s) schemes and private/loopback/link-local IPs
 function isPrivateIp(ip: string): boolean {
     if (net.isIP(ip) === 0) return false;
     if (net.isIP(ip) === 4) {
@@ -101,64 +100,135 @@ export async function expandUrl(url: string): Promise<string> {
     }
 }
 
-interface CobaltResponse {
-    status: "stream" | "redirect" | "picker" | "error";
-    url?: string;
-    text?: string;
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// Cobalt v11 API. Public instances typically require either Turnstile (browser-only)
+// or an API key. For reliable production use, self-host Cobalt and set COBALT_API_URL
+// (plus COBALT_API_KEY if you configured API_KEY_URL on your instance).
+function getCobaltInstances(): string[] {
+    const envUrl = process.env.COBALT_API_URL?.trim();
+    const defaults = [
+        "https://cobalt-backend.canine.tools",
+        "https://cobalt-api.meowing.de",
+        "https://capi.3kh0.net",
+    ];
+    if (envUrl) {
+        return [envUrl.replace(/\/$/, ""), ...defaults.filter(d => d !== envUrl.replace(/\/$/, ""))];
+    }
+    return defaults;
 }
 
-const COBALT_INSTANCES = [
-    "https://dl01.yt-dl.click",
-    "https://dl02.yt-dl.click",
-    "https://cobalt.fariz.dev",
-    "https://ytapi.edd1e.xyz",
-    "http://135.181.27.83:9000",
-    "https://nyc1.coapi.ggtyler.dev",
-    "https://api.cobalt.tools"
-];
+interface CobaltV11Response {
+    status: "tunnel" | "redirect" | "picker" | "error" | "local-processing";
+    url?: string;
+    filename?: string;
+    picker?: Array<{ url?: string; type?: string }>;
+    error?: { code?: string; context?: any };
+}
 
-export async function downloadWithCobalt(url: string, retryCount = 0, options = { isAudioOnly: true }): Promise<{ buffer: Buffer; filename: string }> {
-    const baseUrl = COBALT_INSTANCES[retryCount % COBALT_INSTANCES.length];
-    console.log(`[Cobalt] Trying ${baseUrl}... (Attempt ${retryCount + 1}/${COBALT_INSTANCES.length + 2})`);
+export async function downloadWithCobalt(url: string, options = { isAudioOnly: true }): Promise<{ buffer: Buffer; filename: string }> {
+    const instances = getCobaltInstances();
+    const apiKey = process.env.COBALT_API_KEY?.trim();
+    let lastError: Error | null = null;
 
-    try {
-        const response = await axios.post(`${baseUrl}/api/json`, {
-            url,
-            filenamePattern: "classic",
-            aFormat: "mp3",
-            isAudioOnly: options.isAudioOnly
-        }, {
-            headers: {
+    for (let i = 0; i < instances.length; i++) {
+        const baseUrl = instances[i];
+        console.log(`[Cobalt] Trying ${baseUrl} (${i + 1}/${instances.length})`);
+
+        try {
+            const headers: Record<string, string> = {
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            },
-            timeout: 60000
-        });
+                "User-Agent": UA,
+            };
+            if (apiKey) headers["Authorization"] = `Api-Key ${apiKey}`;
 
-        if (response.data.status === "error" || (!response.data.url && response.data.status !== "picker")) {
-            throw new Error(response.data.text || "Cobalt error");
+            const payload = options.isAudioOnly
+                ? { url, downloadMode: "audio", audioFormat: "mp3", filenameStyle: "basic" }
+                : { url, downloadMode: "auto", filenameStyle: "basic" };
+
+            const response = await axios.post<CobaltV11Response>(baseUrl + "/", payload, {
+                headers,
+                timeout: 60000,
+                validateStatus: () => true,
+            });
+
+            if (response.status === 401 || response.status === 403) {
+                lastError = new Error(`Cobalt auth required at ${baseUrl} (set COBALT_API_URL + COBALT_API_KEY to your self-hosted instance)`);
+                continue;
+            }
+
+            const data = response.data;
+            if (!data || data.status === "error") {
+                lastError = new Error(`Cobalt error at ${baseUrl}: ${data?.error?.code || "unknown"}`);
+                continue;
+            }
+
+            let downloadUrl: string | undefined;
+            let suggestedName = "audio.mp3";
+
+            if (data.status === "tunnel" || data.status === "redirect") {
+                downloadUrl = data.url;
+                if (data.filename) suggestedName = data.filename;
+            } else if (data.status === "picker" && data.picker && data.picker.length > 0) {
+                downloadUrl = data.picker[0].url;
+            }
+
+            if (!downloadUrl) {
+                lastError = new Error(`Cobalt returned no download URL at ${baseUrl}`);
+                continue;
+            }
+
+            const fileResponse = await axios.get(downloadUrl, {
+                responseType: "arraybuffer",
+                timeout: 120000,
+                headers: { "User-Agent": UA },
+            });
+
+            return { buffer: Buffer.from(fileResponse.data), filename: suggestedName };
+        } catch (error: any) {
+            console.error(`[Cobalt] ${baseUrl} failed: ${error.message}`);
+            lastError = error;
         }
-
-        const downloadUrl = response.data.url || (response.data.picker && response.data.picker[0] && response.data.picker[0].url);
-
-        if (!downloadUrl) {
-            throw new Error("No download URL found in Cobalt response");
-        }
-
-        const fileResponse = await axios.get(downloadUrl, { responseType: 'arraybuffer', timeout: 120000 });
-        return { buffer: Buffer.from(fileResponse.data), filename: "audio.mp3" };
-    } catch (error: any) {
-        console.error(`[Cobalt] ${baseUrl} failed: ${error.message}`);
-        if (retryCount < COBALT_INSTANCES.length * 2) {
-            return downloadWithCobalt(url, retryCount + 1, options);
-        }
-        throw error;
     }
+
+    throw lastError || new Error("All Cobalt instances failed");
+}
+
+// tikwm.com is a free public TikTok extractor (no auth). Used as primary TikTok path
+// because Cobalt public instances now require API keys.
+async function downloadFromTikwm(url: string): Promise<{ buffer: Buffer; filename: string; title?: string; author?: string }> {
+    const apiResponse = await axios.get("https://www.tikwm.com/api/", {
+        params: { url, hd: 1 },
+        headers: { "User-Agent": UA },
+        timeout: 30000,
+    });
+
+    const data = apiResponse.data?.data;
+    if (!data) {
+        throw new Error(`tikwm returned no data: ${apiResponse.data?.msg || "unknown"}`);
+    }
+
+    const mediaUrl: string | undefined = data.music || data.play || data.wmplay;
+    if (!mediaUrl) {
+        throw new Error("tikwm response missing media URL");
+    }
+
+    const fileResponse = await axios.get(mediaUrl, {
+        responseType: "arraybuffer",
+        timeout: 120000,
+        headers: { "User-Agent": UA },
+    });
+
+    return {
+        buffer: Buffer.from(fileResponse.data),
+        filename: data.music ? "audio.mp3" : "video.mp4",
+        title: data.title,
+        author: data.author?.nickname || data.author?.unique_id,
+    };
 }
 
 function runFfmpeg(args: string[]): Promise<void> {
-    // Lazy require so Next.js server bundle leaves ffmpeg-static as external
     const ffmpegPath: string | null = require("ffmpeg-static");
     if (!ffmpegPath) {
         return Promise.reject(new Error("ffmpeg-static binary not found"));
@@ -173,8 +243,6 @@ function runFfmpeg(args: string[]): Promise<void> {
     });
 }
 
-// Whisper hard limit is 25MB. If file already fits, skip ffmpeg entirely.
-// If too large, compress heavily to 16kHz mono 32kbps mp3.
 export async function optimizeAudio(buffer: Buffer): Promise<Buffer> {
     const MAX_BYTES = 24 * 1024 * 1024;
     if (buffer.length < MAX_BYTES) {
@@ -201,8 +269,33 @@ export async function optimizeAudio(buffer: Buffer): Promise<Buffer> {
     }
 }
 
+async function getInfoFromYtdlpService(url: string) {
+    const baseUrl = process.env.YTDLP_SERVICE_URL?.replace(/\/$/, "");
+    const secret = process.env.YTDLP_SERVICE_SECRET || "";
+    if (!baseUrl) return null;
+    try {
+        const response = await axios.post(
+            baseUrl + "/info",
+            { url },
+            { timeout: 30000, headers: { "Content-Type": "application/json", "x-auth": secret } },
+        );
+        if (response.data && !response.data.error) {
+            return {
+                title: response.data.title || `Download from ${detectPlatform(url)}`,
+                author: response.data.author || "Unknown",
+                duration: response.data.duration || 0,
+            };
+        }
+    } catch (e) {
+        console.error("[Info] ytdlp service failed:", (e as Error).message);
+    }
+    return null;
+}
+
 export async function getVideoInfo(url: string) {
     const platform = detectPlatform(url);
+    const fromService = await getInfoFromYtdlpService(url);
+    if (fromService) return fromService;
     if (platform === "youtube") {
         try {
             const info = await ytdl.getBasicInfo(url);
@@ -215,51 +308,155 @@ export async function getVideoInfo(url: string) {
             console.error("[Info] ytdl.getBasicInfo failed:", (e as Error).message);
         }
     }
+    if (platform === "tiktok") {
+        try {
+            const resolved = await expandUrl(url);
+            const apiResponse = await axios.get("https://www.tikwm.com/api/", {
+                params: { url: resolved, hd: 1 },
+                headers: { "User-Agent": UA },
+                timeout: 15000,
+            });
+            const data = apiResponse.data?.data;
+            if (data) {
+                return {
+                    title: data.title || "TikTok video",
+                    author: data.author?.nickname || data.author?.unique_id || "Unknown",
+                    duration: data.duration || 0,
+                };
+            }
+        } catch (e) {
+            console.error("[Info] tikwm failed:", (e as Error).message);
+        }
+    }
     return { title: `Download from ${platform}`, author: "Unknown", duration: 0 };
+}
+
+function normalizeAudioFilename(filename: string): string {
+    const supported = ["flac", "m4a", "mp3", "mp4", "mpeg", "mpga", "oga", "ogg", "wav", "webm"];
+    const dot = filename.lastIndexOf(".");
+    const ext = dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
+    if (ext && supported.includes(ext)) return "audio." + ext;
+    return "audio.mp3";
+}
+
+async function downloadViaYtdlpService(url: string): Promise<{ buffer: Buffer; filename: string }> {
+    const baseUrl = process.env.YTDLP_SERVICE_URL?.replace(/\/$/, "");
+    const secret = process.env.YTDLP_SERVICE_SECRET || "";
+    if (!baseUrl) throw new Error("YTDLP_SERVICE_URL not configured");
+
+    const response = await axios.post(
+        baseUrl + "/download",
+        { url },
+        {
+            responseType: "arraybuffer",
+            timeout: 240000,
+            validateStatus: () => true,
+            headers: { "Content-Type": "application/json", "x-auth": secret },
+        },
+    );
+    if (response.status !== 200) {
+        let detail = "";
+        try { detail = JSON.parse(Buffer.from(response.data).toString("utf8")).detail || ""; } catch {}
+        throw new Error(`ytdlp service ${response.status}: ${detail.slice(0, 200)}`);
+    }
+    return { buffer: Buffer.from(response.data), filename: "audio.mp3" };
 }
 
 export async function downloadAudio(url: string): Promise<{ buffer: Buffer; filename: string }> {
     await validatePublicUrl(url);
     const resolvedUrl = await expandUrl(url);
     const platform = detectPlatform(resolvedUrl);
+    const errors: string[] = [];
+    const hasYtdlpService = !!process.env.YTDLP_SERVICE_URL?.trim();
+    const hasSelfHostedCobalt = !!process.env.COBALT_API_URL?.trim();
+
+    if (hasYtdlpService) {
+        try {
+            console.log("[Audio] Self-hosted yt-dlp service (primary)");
+            const result = await downloadViaYtdlpService(resolvedUrl);
+            const optimizedBuffer = await optimizeAudio(result.buffer);
+            return { buffer: optimizedBuffer, filename: result.filename };
+        } catch (error: any) {
+            console.error("[Audio] yt-dlp service failed:", error.message);
+            errors.push(`ytdlp-service: ${error.message}`);
+        }
+    }
+
+    if (hasSelfHostedCobalt) {
+        try {
+            console.log("[Audio] Self-hosted Cobalt (secondary)");
+            let cobaltResult;
+            try {
+                cobaltResult = await downloadWithCobalt(resolvedUrl, { isAudioOnly: true });
+            } catch {
+                console.log("[Audio] Cobalt audio-only failed, retrying with auto mode");
+                cobaltResult = await downloadWithCobalt(resolvedUrl, { isAudioOnly: false });
+            }
+            const optimizedBuffer = await optimizeAudio(cobaltResult.buffer);
+            return { buffer: optimizedBuffer, filename: normalizeAudioFilename(cobaltResult.filename) };
+        } catch (error: any) {
+            console.error("[Audio] Cobalt failed:", error.message);
+            errors.push(`cobalt: ${error.message}`);
+        }
+    }
 
     if (platform === "youtube") {
         try {
-            console.log("[Audio] Attempting ytdl-core...");
+            console.log("[Audio] YouTube → ytdl-core");
             const info = await ytdl.getBasicInfo(resolvedUrl);
-            const title = info.videoDetails.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const title = info.videoDetails.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
 
             const stream = ytdl(resolvedUrl, {
-                filter: 'audioonly',
-                quality: 'lowestaudio',
+                filter: "audioonly",
+                quality: "lowestaudio",
                 requestOptions: {
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                }
+                    headers: { "User-Agent": UA },
+                },
             });
 
             const buffer = await Promise.race([
                 streamToBuffer(stream as unknown as Readable),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ytdl timeout")), 60000))
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ytdl timeout")), 60000)),
             ]);
 
             const optimizedBuffer = await optimizeAudio(buffer);
-            return { buffer: optimizedBuffer, filename: `${title}.mp3` };
+            return { buffer: optimizedBuffer, filename: `${title || "audio"}.mp3` };
         } catch (error: any) {
-            console.error(`[Audio] ytdl-core failed:`, error.message);
+            console.error("[Audio] ytdl-core failed:", error.message);
+            errors.push(`ytdl: ${error.message}`);
         }
     }
 
-    console.log(`[Audio] Falling back to Cobalt...`);
-    let cobaltResult;
-    try {
-        cobaltResult = await downloadWithCobalt(resolvedUrl, 0, { isAudioOnly: true });
-    } catch {
-        console.log(`[Audio] Cobalt audio-only failed, trying video mode...`);
-        cobaltResult = await downloadWithCobalt(resolvedUrl, 0, { isAudioOnly: false });
+    if (platform === "tiktok") {
+        try {
+            console.log("[Audio] TikTok → tikwm");
+            const result = await downloadFromTikwm(resolvedUrl);
+            const optimizedBuffer = await optimizeAudio(result.buffer);
+            return { buffer: optimizedBuffer, filename: normalizeAudioFilename(result.filename) };
+        } catch (error: any) {
+            console.error("[Audio] tikwm failed:", error.message);
+            errors.push(`tikwm: ${error.message}`);
+        }
     }
 
-    const optimizedBuffer = await optimizeAudio(cobaltResult.buffer);
-    return { buffer: optimizedBuffer, filename: cobaltResult.filename };
+    if (!hasSelfHostedCobalt) {
+        console.log("[Audio] Falling back to public Cobalt");
+        try {
+            let cobaltResult;
+            try {
+                cobaltResult = await downloadWithCobalt(resolvedUrl, { isAudioOnly: true });
+            } catch {
+                cobaltResult = await downloadWithCobalt(resolvedUrl, { isAudioOnly: false });
+            }
+            const optimizedBuffer = await optimizeAudio(cobaltResult.buffer);
+            return { buffer: optimizedBuffer, filename: normalizeAudioFilename(cobaltResult.filename) };
+        } catch (error: any) {
+            errors.push(`cobalt-public: ${error.message}`);
+        }
+    }
+
+    const hint = platform === "instagram"
+        ? "Instagram extraction needs a self-hosted Cobalt instance. Set COBALT_API_URL in your env vars."
+        : "All download strategies failed. If this is a private/deleted post, check the URL.";
+    throw new Error(`Could not download audio. ${hint} [${errors.join(" | ")}]`);
 }
