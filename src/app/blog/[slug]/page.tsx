@@ -25,7 +25,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const post = getPostBySlug(slug);
   if (!post) return { title: "Not Found" };
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.com";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.es";
+  const ogImage = post.image ? `${appUrl}${post.image}` : undefined;
 
   return {
     title: `${post.title} | Transcrify Blog`,
@@ -37,11 +38,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       publishedTime: post.date,
       authors: [post.author],
       url: `${appUrl}/blog/${post.slug}`,
+      ...(ogImage && { images: [{ url: ogImage, width: 1200, height: 630, alt: post.title }] }),
     },
     twitter: {
       card: "summary_large_image",
       title: post.title,
       description: post.description,
+      ...(ogImage && { images: [ogImage] }),
     },
     alternates: {
       canonical: `${appUrl}/blog/${post.slug}`,
@@ -56,7 +59,7 @@ export default async function BlogPostPage({ params }: PageProps) {
 
   const related = getRelatedPosts(slug, 3);
   const dict = dictionary.es;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.com";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://transcrify.es";
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -64,6 +67,7 @@ export default async function BlogPostPage({ params }: PageProps) {
     headline: post.title,
     description: post.description,
     datePublished: post.date,
+    ...(post.image && { image: `${appUrl}${post.image}` }),
     author: {
       "@type": "Person",
       name: "Rodri",
@@ -110,6 +114,7 @@ export default async function BlogPostPage({ params }: PageProps) {
             readingTime={post.readingTime}
             category={post.category}
             tags={post.tags}
+            image={post.image}
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-12 mt-12">

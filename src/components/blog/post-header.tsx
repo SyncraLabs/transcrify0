@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Clock, Calendar, User } from "lucide-react";
+import Image from "next/image";
 
 interface PostHeaderProps {
   title: string;
@@ -8,6 +9,7 @@ interface PostHeaderProps {
   readingTime: string;
   category: string;
   tags: string[];
+  image?: string;
 }
 
 export default function PostHeader({
@@ -17,9 +19,23 @@ export default function PostHeader({
   readingTime,
   category,
   tags,
+  image,
 }: PostHeaderProps) {
   return (
     <header className="mb-10">
+      {image && (
+        <div className="relative mb-8 aspect-[1200/630] w-full overflow-hidden rounded-2xl border border-white/10">
+          <Image
+            src={image}
+            alt={title}
+            fill
+            priority
+            sizes="(max-width: 1024px) 100vw, 900px"
+            className="object-cover"
+          />
+        </div>
+      )}
+
       {/* Category pill */}
       <div className="mb-4">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#0079da]/10 px-3 py-1 text-xs font-medium text-[#0079da]">

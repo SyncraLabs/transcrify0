@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { Clock, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -45,11 +46,23 @@ export default function PostCard({ post, featured }: PostCardProps) {
             "relative h-full overflow-hidden rounded-2xl",
             "bg-neutral-900/50 backdrop-blur-md",
             "border border-white/10",
-            "p-6 transition-colors duration-300",
+            "transition-colors duration-300",
             "hover:border-white/20",
-            post.featured && "p-8"
+            "flex flex-col"
           )}
         >
+          {post.image && (
+            <div className="relative aspect-[1200/630] w-full overflow-hidden">
+              <Image
+                src={post.image}
+                alt={post.title}
+                fill
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 600px"
+                className="object-cover transition-transform duration-500 group-hover:scale-105"
+              />
+            </div>
+          )}
+          <div className={cn("flex flex-1 flex-col", post.featured ? "p-8" : "p-6")}>
           {/* Category pill */}
           <div className="mb-4 flex items-center gap-2">
             <span
@@ -100,6 +113,7 @@ export default function PostCard({ post, featured }: PostCardProps) {
             </span>
           </div>
 
+          </div>
           {/* Featured decoration */}
           {post.featured && (
             <BorderBeam

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import CookieConsent from "@/components/ads/cookie-consent";
 import { ADSENSE_CLIENT_ID } from "@/lib/ads";
+import { generateOrganizationJsonLd } from "@/lib/seo";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -27,6 +28,7 @@ export const metadata: Metadata = {
     siteName: "Transcrify",
     type: "website",
     locale: "es_ES",
+    images: [{ url: "/og-default.png", width: 1200, height: 630, alt: "Transcrify — Transcripcion de Video a Texto con IA" }],
   },
   twitter: {
     card: "summary_large_image",
@@ -50,6 +52,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const organizationJsonLd = generateOrganizationJsonLd();
+
   return (
     <html lang="es" className="dark">
       <head>
@@ -57,6 +61,10 @@ export default function RootLayout({
           async
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`}
           crossOrigin="anonymous"
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
         />
       </head>
       <body className={cn(inter.className, "min-h-screen bg-black text-white antialiased")}>

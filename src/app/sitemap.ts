@@ -12,6 +12,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${appUrl}/tools`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${appUrl}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
     { url: `${appUrl}/pricing`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
+    { url: `${appUrl}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${appUrl}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
   ];
 
   const blogPages: MetadataRoute.Sitemap = getAllPosts().map((post) => ({
